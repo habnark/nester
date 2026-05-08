@@ -123,7 +123,7 @@ const defaultBalances = {
 const PortfolioContext = createContext<PortfolioState | null>(null);
 
 function storageKey(address: string) {
-    return `nester_portfolio_v1:${address}`;
+    return `nester_portfolio_v2:${address}`;
 }
 
 function calculatePositionMetrics(position: StoredPosition): PortfolioPosition {
@@ -146,10 +146,6 @@ function calculatePositionMetrics(position: StoredPosition): PortfolioPosition {
     };
 }
 
-function createTransactionHash() {
-    const alphabet = "abcdef0123456789";
-    return Array.from({ length: 64 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-}
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
     const { address } = useWallet();
@@ -196,7 +192,7 @@ function PortfolioStore({
             return {
                 balances: parsed.balances ?? defaultBalances,
                 positions: parsed.positions ?? [],
-                transactions: parsed.transactions ?? [],
+                transactions: (parsed.transactions ?? []).filter((t) => t.isOnChain === true),
             };
         } catch {
             return {
@@ -378,7 +374,7 @@ function PortfolioStore({
                 vaultName: vault.name,
                 timestamp: now.toISOString(),
                 status: "Confirmed",
-                txHash: txHash || createTransactionHash(),
+                txHash: txHash ?? "",
                 isOnChain: isOnChain ?? false,
             },
             ...current,
@@ -429,7 +425,7 @@ function PortfolioStore({
                 vaultName: target.vaultName,
                 timestamp: new Date().toISOString(),
                 status: "Confirmed",
-                txHash: txHash || createTransactionHash(),
+                txHash: txHash ?? "",
                 isOnChain: isOnChain ?? false,
             },
             ...current,
@@ -484,7 +480,7 @@ function PortfolioStore({
                 vaultName: `${source.vaultName} → ${toVault.name}`,
                 timestamp: now.toISOString(),
                 status: "Confirmed",
-                txHash: txHash || createTransactionHash(),
+                txHash: txHash ?? "",
             },
             ...current,
         ]);
