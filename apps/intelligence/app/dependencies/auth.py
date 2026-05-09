@@ -3,27 +3,42 @@
 from typing import Any
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 
-_bearer = HTTPBearer()
+# auto_error=False so missing/invalid auth returns None instead of 403,
+# letting the dev-mode bypass below handle it gracefully.
+_bearer = HTTPBearer(auto_error=False)
 
 
 def verify_jwt(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> dict[str, Any]:
     """Validate a Bearer JWT and return its claims.
 
-    Raises 401 if the token is missing, expired, or has an invalid signature.
-    The secret must match INTELLIGENCE_JWT_SECRET, which must equal
-    AUTH_JWT_SECRET in the Go API so tokens issued there are accepted here.
+    Dev-mode bypass: when INTELLIGENCE_JWT_SECRET is not configured the
+    endpoint is open and the user ID is taken from the `userId` query param.
+    This lets EventSource connections work without a custom auth header.
+
+    In production (secret configured) a valid signed Bearer token is required.
     """
-    token = credentials.credentials
+    if not settings.jwt_secret:
+        user_id = request.query_params.get("userId", "anonymous")
+        return {"sub": user_id}
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         claims: dict[str, Any] = jwt.decode(
-            token,
+            credentials.credentials,
             settings.jwt_secret,
             algorithms=["HS256"],
         )
