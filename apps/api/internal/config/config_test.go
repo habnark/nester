@@ -18,7 +18,7 @@ func baseEnv(t *testing.T) {
 		"SERVER_HOST", "SERVER_PORT",
 		"SERVER_READ_TIMEOUT", "SERVER_WRITE_TIMEOUT", "SERVER_SHUTDOWN_TIMEOUT",
 		"DATABASE_DSN", "DATABASE_POOL_SIZE", "DATABASE_CONNECTION_TIMEOUT",
-		"STELLAR_NETWORK_PASSPHRASE", "STELLAR_RPC_URL", "STELLAR_HORIZON_URL",
+		"STELLAR_NETWORK_PASSPHRASE", "STELLAR_RPC_URL", "STELLAR_HORIZON_URL", "STELLAR_USDC_ISSUER",
 		"AUTH_JWT_SECRET", "AUTH_TOKEN_EXPIRY", "AUTH_CHALLENGE_EXPIRY",
 		"RATELIMIT_GLOBAL_LIMIT", "RATELIMIT_GLOBAL_WINDOW", "RATELIMIT_WRITE_LIMIT", "RATELIMIT_WRITE_WINDOW",
 		"RATELIMIT_WALLET_LIMIT", "RATELIMIT_WALLET_WINDOW",
@@ -161,6 +161,40 @@ func TestLoadFromEnvVars(t *testing.T) {
 	wantDSN := "postgres://postgres:postgres@localhost:5432/nester?sslmode=disable"
 	if cfg.Database().DSN() != wantDSN {
 		t.Fatalf("unexpected DSN: %q", cfg.Database().DSN())
+	}
+}
+
+func TestLoadStellarUSDCIssuerDefault(t *testing.T) {
+	baseEnv(t)
+	requiredEnv(t)
+
+	chdir(t, t.TempDir())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	const expected = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+	if cfg.Stellar().USDCIssuer() != expected {
+		t.Fatalf("expected default USDC issuer %q, got %q", expected, cfg.Stellar().USDCIssuer())
+	}
+}
+
+func TestLoadStellarUSDCIssuerFromEnv(t *testing.T) {
+	baseEnv(t)
+	requiredEnv(t)
+	t.Setenv("STELLAR_USDC_ISSUER", "GTESTUSDCISSUERADDRESSEXAMPLE12345")
+
+	chdir(t, t.TempDir())
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.Stellar().USDCIssuer() != "GTESTUSDCISSUERADDRESSEXAMPLE12345" {
+		t.Fatalf("expected USDC issuer from env, got %q", cfg.Stellar().USDCIssuer())
 	}
 }
 

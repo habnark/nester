@@ -140,7 +140,7 @@ func run() error {
 	authService := service.NewAuthService(challengeStore, userService, cfg.Auth())
 	authHandler := handler.NewAuthHandler(authService)
 
-	oracleService := oracle.NewRateService(cfg.Stellar().HorizonURL())
+	oracleService := oracle.NewRateService(cfg.Stellar().HorizonURL(), cfg.Stellar().USDCIssuer())
 	rateHandler := handler.NewRateHandler(oracleService)
 
 	wsHub := ws.NewHub(baseLogger.WithGroup("websocket"), func(token string) (string, error) {
