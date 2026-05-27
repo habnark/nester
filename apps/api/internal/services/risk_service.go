@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/vault"
-	"github.com/suncrestlabs/nester/apps/api/internal/repository"
 )
 
 // RiskScore represents the risk score for a vault.
@@ -24,14 +23,14 @@ type RiskScore struct {
 
 // RiskService computes risk scores for vaults.
 type RiskService struct {
-	vaultRepo repository.VaultRepository
+	vaultRepo vault.Repository
 	cache     map[uuid.UUID]*RiskScore
 	cacheMu   sync.RWMutex
 	cacheTTL  time.Duration
 }
 
 // NewRiskService creates a new RiskService.
-func NewRiskService(vaultRepo repository.VaultRepository) *RiskService {
+func NewRiskService(vaultRepo vault.Repository) *RiskService {
 	return &RiskService{
 		vaultRepo: vaultRepo,
 		cache:     make(map[uuid.UUID]*RiskScore),

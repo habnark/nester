@@ -1,10 +1,6 @@
 // Package analytics defines the types used in analytics API responses.
 package analytics
 
-import (
-	"time"
-)
-
 // AnalyticsResponse represents the analytics data for a user
 type AnalyticsResponse struct {
 	DailySnapshots      []DailySnapshot      `json:"daily_snapshots"`

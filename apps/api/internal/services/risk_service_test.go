@@ -4,19 +4,17 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/vault"
-	"github.com/suncrestlabs/nester/apps/api/internal/repository"
 )
 
 // stubVaultRepository is a minimal implementation of vault.Repository for testing
 type stubVaultRepository struct {
-	vault  vault.Vault
-	err    error
+	vault vault.Vault
+	err   error
 }
 
 func (s *stubVaultRepository) CreateVault(_ context.Context, model vault.Vault) (vault.Vault, error) {
@@ -27,8 +25,8 @@ func (s *stubVaultRepository) GetVault(_ context.Context, id uuid.UUID) (vault.V
 	return s.vault, s.err
 }
 
-func (s *stubVaultRepository) GetUserVaults(_ context.Context, userID uuid.UUID) ([]vault.Vault, error) {
-	return nil, errors.New("not implemented")
+func (s *stubVaultRepository) ListUserVaults(_ context.Context, userID uuid.UUID, filter vault.UserListFilter) ([]vault.Vault, int, error) {
+	return nil, 0, errors.New("not implemented")
 }
 
 func (s *stubVaultRepository) RecordDeposit(_ context.Context, id uuid.UUID, amount decimal.Decimal) error {
@@ -56,6 +54,56 @@ func (s *stubVaultRepository) SoftDeleteVault(_ context.Context, id uuid.UUID) e
 }
 
 func (s *stubVaultRepository) ListDeposits(_ context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
+	return nil, errors.New("not implemented")
+}
+
+type stubVaultRepositoryWithCount struct {
+	vault      vault.Vault
+	err        error
+	callCount  int
+	getVaultFn func(context.Context, uuid.UUID) (vault.Vault, error)
+}
+
+func (s *stubVaultRepositoryWithCount) CreateVault(_ context.Context, model vault.Vault) (vault.Vault, error) {
+	return vault.Vault{}, errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) GetVault(_ context.Context, id uuid.UUID) (vault.Vault, error) {
+	if s.getVaultFn != nil {
+		return s.getVaultFn(context.Background(), id)
+	}
+	return s.vault, s.err
+}
+
+func (s *stubVaultRepositoryWithCount) ListUserVaults(_ context.Context, userID uuid.UUID, filter vault.UserListFilter) ([]vault.Vault, int, error) {
+	return nil, 0, errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) RecordDeposit(_ context.Context, id uuid.UUID, amount decimal.Decimal) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) UpdateVaultBalances(_ context.Context, id uuid.UUID, totalDeposited decimal.Decimal, currentBalance decimal.Decimal) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) ReplaceAllocations(_ context.Context, vaultID uuid.UUID, allocations []vault.Allocation) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) UpdateVault(_ context.Context, id uuid.UUID, contractAddress string, status vault.VaultStatus) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) RecordWithdrawal(_ context.Context, id uuid.UUID, amount decimal.Decimal) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) SoftDeleteVault(_ context.Context, id uuid.UUID) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) ListDeposits(_ context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
 	return nil, errors.New("not implemented")
 }
 
@@ -237,7 +285,7 @@ func TestRiskService_Caching(t *testing.T) {
 	// Arrange: vault with some allocations
 	vaultID := uuid.New()
 	userID := uuid.New()
-	vault := vault.Vault{
+	v := vault.Vault{
 		ID: vaultID,
 		UserID: userID,
 		TotalDeposited: decimal.NewFromInt(1000),
@@ -262,13 +310,11 @@ func TestRiskService_Caching(t *testing.T) {
 	}
 	
 	callCount := 0
-	repo := &stubVaultRepository{
-		vault: vault,
-		err: nil,
-		// Override GetVault to count calls
-		GetVault: func(_ context.Context, id uuid.UUID) (vault.Vault, error) {
+	repo := &stubVaultRepositoryWithCount{
+		vault: v,
+		getVaultFn: func(_ context.Context, id uuid.UUID) (vault.Vault, error) {
 			callCount++
-			return vault, nil
+			return v, nil
 		},
 	}
 	service := NewRiskService(repo)
