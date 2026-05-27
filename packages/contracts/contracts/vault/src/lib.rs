@@ -1333,6 +1333,17 @@ impl VaultContract {
         vault_token_client(&env).shares_for_deposit(&amount)
     }
 
+    /// Returns the **gross**, pre-fee asset value of `shares` (the raw
+    /// share-price conversion, like an EIP-4626 `previewRedeem` of the
+    /// underlying price).
+    ///
+    /// ⚠️ Do **not** pass this value straight through as `min_assets_out` to
+    /// [`VaultContract::withdraw`]. A fee-bearing withdrawal deducts a
+    /// performance fee (on realized yield) and/or an early-withdrawal fee, so
+    /// the amount actually transferred is *less* than this gross figure and the
+    /// call reverts with `ContractError::SlippageExceeded` (see #448). For a
+    /// slippage-safe floor that reflects the fees deducted on withdrawal, use
+    /// [`VaultContract::withdrawal_fee_preview`] and read `net_amount_received`.
     pub fn preview_withdraw(env: Env, shares: i128) -> i128 {
         require_initialized(&env);
         if shares <= 0 {
