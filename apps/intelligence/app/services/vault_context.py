@@ -19,6 +19,7 @@ class VaultContextFetcher:
         self.api_base_url = api_base_url.rstrip('/')
         self.service_api_key = service_api_key
         # Initialize market rates cache (TTL: 5 minutes)
+        self._market_rates_cache: Any
         if HAS_CACHETOOLS:
             self._market_rates_cache = TTLCache(maxsize=100, ttl=300)  # 5 minutes
         else:

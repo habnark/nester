@@ -3,14 +3,10 @@ package performance
 import (
 	"context"
 	"errors"
-	"math"
-	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	perfdom "github.com/suncrestlabs/nester/apps/api/internal/domain/performance"
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/vault"
 )
 
@@ -58,5 +54,4 @@ func (s *stubVaultRepository) SoftDeleteVault(_ context.Context, id uuid.UUID) e
 
 func (s *stubVaultRepository) ListDeposits(_ context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
 	return nil, errors.New("not implemented")
-}
 }

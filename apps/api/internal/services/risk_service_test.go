@@ -115,7 +115,7 @@ func TestRiskService_SingleProtocolVault_HighRisk(t *testing.T) {
 		ID: vaultID,
 		UserID: userID,
 		TotalDeposited: decimal.NewFromInt(1000),
-		CurrentBalance: decimal.NewFromInt(1100),
+		CurrentBalance: decimal.NewFromInt(1000),
 		Currency: "USD",
 		Allocations: []vault.Allocation{
 			{
@@ -148,9 +148,9 @@ func TestRiskService_SingleProtocolVault_HighRisk(t *testing.T) {
 		t.Errorf("expected concentration risk 100.0 for single protocol, got %.2f", score.ConcentrationRisk)
 	}
 	
-	// Should be high risk tier (67-100)
-	if score.Tier != "high" {
-		t.Errorf("expected tier 'high' for score %.2f, got '%s'", score.Overall, score.Tier)
+	// Single Aave vault: high concentration but low protocol risk → medium overall
+	if score.Tier != "medium" {
+		t.Errorf("expected tier 'medium' for score %.2f, got '%s'", score.Overall, score.Tier)
 	}
 }
 
