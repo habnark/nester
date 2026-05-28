@@ -292,7 +292,7 @@ class VaultContextFetcher:
 
             risk_lines.append(
                 f"- {vault_name}: {tier} risk (score {overall_score:.0f}/100). "
-                f"Primary driver: {primary_driver_name}. {recommendation}"
+                f"Primary driver: {primary_driver_name}. Recommendation: {recommendation}"
             )
 
         return f"""## Risk Profile
