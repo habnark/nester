@@ -428,6 +428,73 @@ fn withdraw_reverts_when_min_assets_out_is_not_met() {
     vault.withdraw(&user, &(500 * XLM), &(500 * XLM + STROOP));
 }
 
+// Regression for #448: `withdrawal_fee_preview().net_amount_received` is the
+// post-fee amount actually transferred, so a caller can use it directly as
+// `min_assets_out` for a fee-bearing withdrawal without tripping slippage.
+//
+// No time is advanced, so no management fee accrues (elapsed = 0) and the
+// preview models every fee the withdrawal applies exactly: the reported yield
+// triggers a performance fee, and remaining inside the MinLockPeriod triggers
+// the early-withdrawal fee.
+#[test]
+fn withdrawal_fee_preview_net_is_slippage_safe_as_min_assets_out() {
+    let (env, admin, token, vault, _treasury) = setup();
+    let user = Address::generate(&env);
+    let deposit = 1_000 * XLM;
+    mint(&token, &user, deposit);
+    vault.deposit(&user, &deposit, &0);
+
+    vault.grant_role(&admin, &admin, &Role::Manager);
+    vault.report_yield(&admin, &(500 * XLM));
+    // Back the reported yield with real tokens so the vault can pay it out
+    // (report_yield only updates share-price accounting).
+    mint(&token, &vault.address, 500 * XLM);
+
+    let shares = vault.get_shares(&user);
+    let preview = vault.withdrawal_fee_preview(&user, &shares);
+    assert!(
+        preview.performance_fee_deducted > 0,
+        "expected a performance fee on realized yield"
+    );
+    assert!(
+        preview.early_withdrawal_fee_deducted > 0,
+        "expected an early-withdrawal fee inside the lock period"
+    );
+    assert!(preview.net_amount_received < preview.gross_asset_value);
+
+    let before = token::Client::new(&env, &token.address).balance(&user);
+
+    // Using the NET preview as the slippage floor must succeed.
+    vault.withdraw(&user, &shares, &preview.net_amount_received);
+
+    let after = token::Client::new(&env, &token.address).balance(&user);
+    // The user receives exactly the previewed net amount — the preview is an
+    // exact (not merely conservative) floor.
+    assert_eq!(after - before, preview.net_amount_received);
+}
+
+// Regression for #448: the GROSS preview (`preview_withdraw` /
+// `gross_asset_value`) must NOT be used as `min_assets_out` — on a fee-bearing
+// withdrawal the transfer is below gross, so it reverts with SlippageExceeded
+// (#17). This is exactly the failure mode the issue describes.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")]
+fn gross_preview_as_min_assets_out_trips_slippage_on_fee_bearing_withdrawal() {
+    let (env, admin, token, vault, _treasury) = setup();
+    let user = Address::generate(&env);
+    let deposit = 1_000 * XLM;
+    mint(&token, &user, deposit);
+    vault.deposit(&user, &deposit, &0);
+
+    vault.grant_role(&admin, &admin, &Role::Manager);
+    vault.report_yield(&admin, &(500 * XLM));
+
+    let shares = vault.get_shares(&user);
+    let gross = vault.preview_withdraw(&shares);
+    // gross > net (fees apply) => SlippageExceeded.
+    vault.withdraw(&user, &shares, &gross);
+}
+
 #[test]
 #[should_panic]
 fn withdrawal_of_more_than_owned_is_rejected() {
