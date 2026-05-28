@@ -126,6 +126,49 @@ func (r *VaultRepository) ListUserVaults(
 	return vaults, total, nil
 }
 
+// ListVaults returns a paginated slice of all non-deleted vaults.
+func (r *VaultRepository) ListVaults(ctx context.Context, filter vault.ListFilter) ([]vault.Vault, int, error) {
+	args := []any{}
+	where := "deleted_at IS NULL"
+	if filter.Status != "" {
+		args = append(args, filter.Status)
+		where += fmt.Sprintf(" AND status = $%d", len(args))
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM vaults WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, mapRepositoryError(err)
+	}
+
+	args = append(args, filter.Limit, filter.Offset)
+	listQuery := fmt.Sprintf(`
+		SELECT id, user_id, contract_address, total_deposited, current_balance, currency, status, yield_earned, fees_paid, last_synced_at, deleted_at, created_at, updated_at
+		FROM vaults
+		WHERE %s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, where, len(args)-1, len(args)) // #nosec G201 -- where is built from whitelist only
+
+	rows, err := r.db.QueryContext(ctx, listQuery, args...)
+	if err != nil {
+		return nil, 0, mapRepositoryError(err)
+	}
+	defer rows.Close()
+
+	out := make([]vault.Vault, 0, filter.Limit)
+	for rows.Next() {
+		model, err := scanVault(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
 // ListActive returns every non-deleted vault whose status is `active`. Used
 // by the performance tracker so it can iterate live vaults each tick.
 func (r *VaultRepository) ListActive(ctx context.Context) ([]vault.Vault, error) {

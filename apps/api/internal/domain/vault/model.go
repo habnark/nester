@@ -83,10 +83,10 @@ type Repository interface {
 	CreateVault(ctx context.Context, model Vault) (Vault, error)
 	GetVault(ctx context.Context, id uuid.UUID) (Vault, error)
 	ListUserVaults(ctx context.Context, userID uuid.UUID, filter UserListFilter) ([]Vault, int, error)
+	ListVaults(ctx context.Context, filter ListFilter) ([]Vault, int, error)
 	RecordDeposit(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
 	UpdateVaultBalances(ctx context.Context, id uuid.UUID, totalDeposited decimal.Decimal, currentBalance decimal.Decimal) error
 	ReplaceAllocations(ctx context.Context, vaultID uuid.UUID, allocations []Allocation) error
-	// New methods wired to the new endpoints.
 	UpdateVault(ctx context.Context, id uuid.UUID, contractAddress string, status VaultStatus) error
 	RecordWithdrawal(ctx context.Context, id uuid.UUID, amount decimal.Decimal) error
 	SoftDeleteVault(ctx context.Context, id uuid.UUID) error

@@ -282,6 +282,26 @@ func (r *memoryVaultRepository) ListDeposits(_ context.Context, vaultID uuid.UUI
 	return result, nil
 }
 
+func (r *memoryVaultRepository) ListVaults(_ context.Context, filter vault.ListFilter) ([]vault.Vault, int, error) {
+	out := make([]vault.Vault, 0)
+	for _, v := range r.vaults {
+		if filter.Status != "" && string(v.Status) != filter.Status {
+			continue
+		}
+		out = append(out, v)
+	}
+	total := len(out)
+	if filter.Offset < total {
+		out = out[filter.Offset:]
+	} else {
+		out = nil
+	}
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, total, nil
+}
+
 func cloneVault(model vault.Vault) vault.Vault {
 	model.Allocations = append([]vault.Allocation(nil), model.Allocations...)
 	return model

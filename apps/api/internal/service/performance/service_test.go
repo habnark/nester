@@ -55,3 +55,7 @@ func (s *stubVaultRepository) SoftDeleteVault(_ context.Context, id uuid.UUID) e
 func (s *stubVaultRepository) ListDeposits(_ context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
 	return nil, errors.New("not implemented")
 }
+
+func (s *stubVaultRepository) ListVaults(_ context.Context, _ vault.ListFilter) ([]vault.Vault, int, error) {
+	return nil, 0, errors.New("not implemented")
+}

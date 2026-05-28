@@ -388,6 +388,38 @@ func (s *VaultService) DeleteVault(ctx context.Context, vaultID uuid.UUID) error
 	return s.repository.SoftDeleteVault(ctx, vaultID)
 }
 
+const (
+	defaultVaultListLimit = 20
+	maxVaultListLimit     = 100
+)
+
+// ListVaultsInput carries validated pagination params for the public list endpoint.
+type ListVaultsInput struct {
+	Limit  int
+	Offset int
+	Status string
+}
+
+// ListVaults returns a paginated slice of all non-deleted vaults.
+func (s *VaultService) ListVaults(ctx context.Context, input ListVaultsInput) ([]vault.Vault, int, error) {
+	limit := input.Limit
+	if limit <= 0 {
+		limit = defaultVaultListLimit
+	}
+	if limit > maxVaultListLimit {
+		limit = maxVaultListLimit
+	}
+	offset := input.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	return s.repository.ListVaults(ctx, vault.ListFilter{
+		Limit:  limit,
+		Offset: offset,
+		Status: input.Status,
+	})
+}
+
 // ListDeposits returns the deposit transaction history for a vault.
 func (s *VaultService) ListDeposits(ctx context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
 	if vaultID == uuid.Nil {

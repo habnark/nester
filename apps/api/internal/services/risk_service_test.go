@@ -57,6 +57,10 @@ func (s *stubVaultRepository) ListDeposits(_ context.Context, vaultID uuid.UUID)
 	return nil, errors.New("not implemented")
 }
 
+func (s *stubVaultRepository) ListVaults(_ context.Context, _ vault.ListFilter) ([]vault.Vault, int, error) {
+	return nil, 0, errors.New("not implemented")
+}
+
 type stubVaultRepositoryWithCount struct {
 	vault      vault.Vault
 	err        error
@@ -105,6 +109,10 @@ func (s *stubVaultRepositoryWithCount) SoftDeleteVault(_ context.Context, id uui
 
 func (s *stubVaultRepositoryWithCount) ListDeposits(_ context.Context, vaultID uuid.UUID) ([]vault.VaultTransaction, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (s *stubVaultRepositoryWithCount) ListVaults(_ context.Context, _ vault.ListFilter) ([]vault.Vault, int, error) {
+	return nil, 0, errors.New("not implemented")
 }
 
 func TestRiskService_SingleProtocolVault_HighRisk(t *testing.T) {

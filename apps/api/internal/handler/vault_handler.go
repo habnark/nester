@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ func (h *VaultHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/vaults/{id}", h.getVault)
 	mux.HandleFunc("GET /api/v1/vaults/{id}/allocations", h.getAllocations)
 	mux.HandleFunc("GET /api/v1/vaults", h.listUserVaults)
+	mux.HandleFunc("GET /api/v1/vaults/all", h.listVaults)
 }
 
 func (h *VaultHandler) createVault(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +99,52 @@ func (h *VaultHandler) getVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, response.OK(model))
+}
+
+func (h *VaultHandler) listVaults(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	limit := 20
+	if raw := q.Get("limit"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 {
+			response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("limit must be a positive integer"))
+			return
+		}
+		if v > 100 {
+			response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("limit must not exceed 100"))
+			return
+		}
+		limit = v
+	}
+
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			response.WriteJSON(w, http.StatusBadRequest, response.ValidationErr("offset must be a non-negative integer"))
+			return
+		}
+		offset = v
+	}
+
+	vaults, total, err := h.service.ListVaults(r.Context(), service.ListVaultsInput{
+		Limit:  limit,
+		Offset: offset,
+		Status: q.Get("status"),
+	})
+	if err != nil {
+		h.writeDomainError(w, r, err)
+		return
+	}
+
+	out := response.OK(vaults)
+	out.Meta = &response.Meta{
+		Page:       offset/limit + 1,
+		PerPage:    limit,
+		TotalCount: total,
+	}
+	response.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *VaultHandler) listUserVaults(w http.ResponseWriter, r *http.Request) {

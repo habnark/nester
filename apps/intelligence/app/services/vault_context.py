@@ -233,7 +233,7 @@ class VaultContextFetcher:
             for rate in market_rates:
                 protocol = rate.get("protocol", "unknown").upper()
                 apy = rate.get("apy", 0)
-                market_lines.append(f"- {protocol}: {apy:.2f}% APY")
+                market_lines.append(f"- {protocol}: {apy * 100:.2f}% APY")
 
             market_context = f"""## Current Market Rates (Live)
 {chr(10).join(market_lines)}"""
@@ -291,8 +291,8 @@ class VaultContextFetcher:
             recommendation = self._generate_risk_recommendation(tier, primary_driver, vault_risk)
 
             risk_lines.append(
-                f"- {vault_name}: {tier.capitalize()} risk (score {overall_score:.0f}/100). "
-                f"Primary driver: {primary_driver_name}. {recommendation}"
+                f"- {vault_name}: {tier} risk (score {overall_score:.0f}/100). "
+                f"Primary driver: {primary_driver_name}. Recommendation: {recommendation}"
             )
 
         return f"""## Risk Profile
@@ -306,29 +306,43 @@ class VaultContextFetcher:
             return "Your portfolio is well-balanced. Consider maintaining current allocation."
         elif tier == "medium":
             if primary_driver == "concentration_risk":
-                return "Consider diversifying across additional protocols to reduce "
-                "concentration risk."
+                return (
+                    "Consider diversifying across additional protocols to reduce "
+                    "concentration risk."
+                )
             elif primary_driver == "protocol_risk":
                 return (
                     "Consider shifting allocation toward lower-risk protocols "
                     "like Aave or Compound."
                 )
             elif primary_driver == "yield_volatility":
-                return "Consider allocating to more stable vaults with lower "
-                "APY variability."
+                return (
+                    "Consider allocating to more stable vaults with lower "
+                    "APY variability."
+                )
             else:  # liquidity_risk
-                return "Your vault size may be large relative to protocol market "
-                "size. Consider smaller positions."
+                return (
+                    "Your vault size may be large relative to protocol market size. "
+                    "Consider smaller positions."
+                )
         else:  # high risk
             if primary_driver == "concentration_risk":
-                return "Strongly consider diversifying across multiple protocols to "
-                "reduce concentration risk."
+                return (
+                    "Strongly consider diversifying across multiple protocols to "
+                    "reduce concentration risk."
+                )
             elif primary_driver == "protocol_risk":
-                return "Consider reallocating to lower-risk protocols to reduce "
-                "overall portfolio risk."
+                return (
+                    "consider reallocating to lower-risk protocols to reduce "
+                    "overall portfolio risk."
+                )
             elif primary_driver == "yield_volatility":
-                return "Consider moving to more stable yield strategies to reduce "
-                "volatility exposure."
+                return (
+                    "consider moving to more stable yield strategies to reduce "
+                    "volatility exposure."
+                )
             else:  # liquidity_risk
-                return "Consider reducing position size to lower liquidity risk or "
-                "spreading across protocols."
+                return (
+                    "consider reducing position size to lower liquidity risk or "
+                    "spreading across protocols."
+                )

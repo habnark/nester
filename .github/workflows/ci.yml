@@ -228,6 +228,18 @@ jobs:
         working-directory: apps/intelligence
         continue-on-error: true
 
+      - name: Semgrep SAST (TypeScript/Next.js)
+        if: needs.changes.outputs.dapp == 'true' || needs.changes.outputs.shared == 'true'
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/typescript
+            p/react
+            p/nextjs
+            p/secrets
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
   api:
     name: API (Go)
     needs: changes
