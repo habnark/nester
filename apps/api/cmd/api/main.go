@@ -18,7 +18,9 @@ import (
 
 	"github.com/suncrestlabs/nester/apps/api/internal/auth"
 	"github.com/suncrestlabs/nester/apps/api/internal/config"
-	dbpkg "github.com/suncrestlabs/nester/apps/api/internal/db"
+	"github.com/golang-migrate/migrate/v4"
+	migratedb "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/suncrestlabs/nester/apps/api/internal/handler"
 	"github.com/suncrestlabs/nester/apps/api/internal/middleware"
 	"github.com/suncrestlabs/nester/apps/api/internal/oracle"
@@ -65,9 +67,23 @@ func run() error {
 
 	if cfg.Startup().EnableAutoMigrate() {
 		baseLogger.Info("running database migrations", "dir", cfg.Startup().MigrationsDir())
-		if err := dbpkg.MigrateUp(db, cfg.Startup().MigrationsDir()); err != nil {
-			return fmt.Errorf("auto-migrate: %w", err)
+		
+		driver, err := migratedb.WithInstance(db, &migratedb.Config{})
+		if err != nil {
+			return fmt.Errorf("auto-migrate: init driver: %w", err)
 		}
+		
+		m, err := migrate.NewWithDatabaseInstance(
+			"file://"+cfg.Startup().MigrationsDir(),
+			"postgres", driver)
+		if err != nil {
+			return fmt.Errorf("auto-migrate: new migrate instance: %w", err)
+		}
+		
+		if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			return fmt.Errorf("auto-migrate: up: %w", err)
+		}
+
 		baseLogger.Info("database migrations complete")
 	} else {
 		baseLogger.Info("auto-migrate disabled; skipping migrations")
