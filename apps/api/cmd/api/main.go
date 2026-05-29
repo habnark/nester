@@ -100,6 +100,9 @@ func run() error {
 
 	transactionRepository := postgres.NewTransactionRepository(db)
 	transactionService := service.NewTransactionService(transactionRepository, cfg.Stellar().HorizonURL())
+	// Balance is moved only after a deposit/withdrawal is confirmed on-chain
+	// (issue #496); the vault repository applies it idempotently by tx hash.
+	transactionService.SetBalanceApplier(vaultRepository)
 	transactionHandler := handler.NewTransactionHandler(transactionService)
 
 	settlementRepository := postgres.NewSettlementRepository(db)

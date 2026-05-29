@@ -15,10 +15,25 @@ import (
 	"github.com/suncrestlabs/nester/apps/api/internal/domain/transaction"
 )
 
+// VaultBalanceApplier credits or debits a vault's balance for a transaction
+// that has been confirmed on-chain. Implementations MUST be idempotent on
+// txHash so a retried confirmation never double-applies. The production
+// implementation is the Postgres vault repository; tests pass a fake.
+//
+// This is the single boundary through which a vault balance ever moves as a
+// result of a deposit/withdrawal: balance is applied only after Horizon
+// reports the transaction in a closed, successful ledger — never at submission
+// time (issue #496).
+type VaultBalanceApplier interface {
+	ApplyConfirmedDeposit(ctx context.Context, vaultID uuid.UUID, amount decimal.Decimal, txHash string) error
+	ApplyConfirmedWithdrawal(ctx context.Context, vaultID uuid.UUID, amount decimal.Decimal, txHash string) error
+}
+
 type TransactionService struct {
 	repository transaction.Repository
 	horizonURL  string
 	client      *http.Client
+	balance     VaultBalanceApplier
 }
 
 type RegisterTransactionInput struct {
@@ -37,6 +52,14 @@ func NewTransactionService(repository transaction.Repository, horizonURL string)
 			Timeout: 10 * time.Second,
 		},
 	}
+}
+
+// SetBalanceApplier wires the vault balance applier used to credit/debit a
+// vault once a deposit/withdrawal is confirmed on-chain. Optional: when unset,
+// status is still reconciled but no balance is moved (used by tests that only
+// exercise status transitions).
+func (s *TransactionService) SetBalanceApplier(applier VaultBalanceApplier) {
+	s.balance = applier
 }
 
 func (s *TransactionService) RegisterTransaction(ctx context.Context, input RegisterTransactionInput) (transaction.Transaction, error) {
@@ -110,7 +133,22 @@ func (s *TransactionService) ReconcileTransaction(ctx context.Context, model tra
 	}
 
 	switch horizonStatus {
-	case transaction.StatusCompleted, transaction.StatusFailed:
+	case transaction.StatusCompleted:
+		// Credit/debit the vault BEFORE marking the transaction completed.
+		// If the balance change fails, we return the error and leave the
+		// transaction pending so the next poll retries; the applier is
+		// idempotent, so a retry after a partial failure cannot double-apply.
+		if err := s.applyConfirmedBalance(ctx, model); err != nil {
+			return model, false, err
+		}
+		updated, updateErr := s.repository.UpdateStatus(ctx, model.TxHash, horizonStatus, confirmedAt, errorReason)
+		if updateErr != nil {
+			return model, false, updateErr
+		}
+		return updated, true, nil
+	case transaction.StatusFailed:
+		// Failed/reverted on-chain: record the failure reason and never touch
+		// the balance.
 		updated, updateErr := s.repository.UpdateStatus(ctx, model.TxHash, horizonStatus, confirmedAt, errorReason)
 		if updateErr != nil {
 			return model, false, updateErr
@@ -118,6 +156,23 @@ func (s *TransactionService) ReconcileTransaction(ctx context.Context, model tra
 		return updated, true, nil
 	default:
 		return model, false, nil
+	}
+}
+
+// applyConfirmedBalance moves the vault balance for a confirmed deposit or
+// withdrawal. It is a no-op for other transaction types (e.g. settlement) and
+// when no applier is configured.
+func (s *TransactionService) applyConfirmedBalance(ctx context.Context, model transaction.Transaction) error {
+	if s.balance == nil {
+		return nil
+	}
+	switch model.Type {
+	case transaction.TypeDeposit:
+		return s.balance.ApplyConfirmedDeposit(ctx, model.VaultID, model.Amount, model.TxHash)
+	case transaction.TypeWithdrawal:
+		return s.balance.ApplyConfirmedWithdrawal(ctx, model.VaultID, model.Amount, model.TxHash)
+	default:
+		return nil
 	}
 }
 

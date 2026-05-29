@@ -388,6 +388,92 @@ func (r *VaultRepository) RecordWithdrawal(ctx context.Context, id uuid.UUID, am
 	return tx.Commit()
 }
 
+// ApplyConfirmedDeposit credits a vault's balance for a deposit that has been
+// confirmed on-chain. It is keyed by the Stellar transaction hash and is
+// idempotent: a second call with the same hash is a no-op (no balance change,
+// no duplicate ledger row), so the auto-confirmation worker can safely retry.
+// This is the only path that credits balance from a confirmed deposit —
+// balance is never moved at submission time.
+func (r *VaultRepository) ApplyConfirmedDeposit(ctx context.Context, id uuid.UUID, amount decimal.Decimal, txHash string) error {
+	return r.applyConfirmedBalanceChange(ctx, id, amount, txHash, "deposit")
+}
+
+// ApplyConfirmedWithdrawal debits a vault's balance for a withdrawal confirmed
+// on-chain. Idempotent on txHash, mirroring ApplyConfirmedDeposit.
+func (r *VaultRepository) ApplyConfirmedWithdrawal(ctx context.Context, id uuid.UUID, amount decimal.Decimal, txHash string) error {
+	return r.applyConfirmedBalanceChange(ctx, id, amount, txHash, "withdrawal")
+}
+
+func (r *VaultRepository) applyConfirmedBalanceChange(ctx context.Context, id uuid.UUID, amount decimal.Decimal, txHash, txType string) error {
+	if amount.Cmp(decimal.Zero) <= 0 {
+		return vault.ErrInvalidAmount
+	}
+	if strings.TrimSpace(txHash) == "" {
+		// Without a hash we cannot dedupe, and a confirmed on-chain change
+		// always has one. Refuse rather than risk a double credit.
+		return vault.ErrInvalidVault
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Claim the hash first. If another worker (or an earlier retry) already
+	// applied this transaction, the insert affects zero rows and we leave the
+	// balance untouched.
+	ledger, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO vault_transactions (vault_id, type, amount, transaction_hash)
+		 VALUES ($1, $2, $3::numeric, $4)
+		 ON CONFLICT (transaction_hash) DO NOTHING`,
+		id.String(),
+		txType,
+		amount.String(),
+		txHash,
+	)
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	inserted, err := ledger.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if inserted == 0 {
+		// Already applied for this hash — idempotent no-op.
+		return tx.Commit()
+	}
+
+	var balanceSQL string
+	if txType == "deposit" {
+		balanceSQL = `UPDATE vaults
+			 SET total_deposited = total_deposited + $2::numeric,
+			     current_balance = current_balance + $2::numeric,
+			     updated_at = NOW()
+			 WHERE id = $1 AND deleted_at IS NULL`
+	} else {
+		balanceSQL = `UPDATE vaults
+			 SET current_balance = current_balance - $2::numeric,
+			     updated_at = NOW()
+			 WHERE id = $1 AND deleted_at IS NULL`
+	}
+
+	result, err := tx.ExecContext(ctx, balanceSQL, id.String(), amount.String())
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return vault.ErrVaultNotFound
+	}
+
+	return tx.Commit()
+}
+
 // SoftDeleteVault stamps deleted_at so reads exclude this vault going forward.
 func (r *VaultRepository) SoftDeleteVault(ctx context.Context, id uuid.UUID) error {
 	result, err := r.db.ExecContext(
