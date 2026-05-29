@@ -2,10 +2,13 @@
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 import anthropic
+import aiohttp
 
 from app.config import settings
 from app.services.conversation_store import store as conversation_store
@@ -16,8 +19,16 @@ logger = logging.getLogger(__name__)
 CHAT_MAX_TOKENS = 1024
 ANALYZE_MAX_TOKENS = 800
 
+_CONTEXT_CACHE_TTL = 60  # seconds
+_CONTEXT_KEY_PREFIX = "prometheus:ctx:"
+
 _client: anthropic.AsyncAnthropic | None = None
 _vault_context_fetcher: VaultContextFetcher | None = None
+_redis_client: Any = None
+_redis_available: bool = False
+
+# In-process fallback cache: {user_id: (context_dict, expires_at)}
+_mem_context_cache: dict[str, tuple[dict[str, Any], float]] = {}
 
 
 def get_client() -> anthropic.AsyncAnthropic:
@@ -35,6 +46,107 @@ def get_vault_context_fetcher() -> VaultContextFetcher:
             service_api_key=settings.nester_service_api_key
         )
     return _vault_context_fetcher
+
+
+def _get_redis() -> Any:
+    """Return a shared Redis client, or None if unavailable."""
+    global _redis_client, _redis_available
+    if _redis_client is not None:
+        return _redis_client if _redis_available else None
+    try:
+        import redis as _redis
+        _redis_client = _redis.from_url(settings.redis_url, decode_responses=True)
+        _redis_client.ping()
+        _redis_available = True
+        logger.info("prometheus context cache: redis connected")
+    except Exception as exc:
+        logger.warning("prometheus context cache: redis unavailable (%s), using in-memory", exc)
+        _redis_available = False
+    return _redis_client if _redis_available else None
+
+
+def _cache_get(user_id: str) -> dict[str, Any] | None:
+    key = _CONTEXT_KEY_PREFIX + user_id
+    r = _get_redis()
+    if r is not None:
+        try:
+            raw = r.get(key)
+            if raw:
+                return dict(json.loads(raw))
+        except Exception as exc:
+            logger.warning("context cache redis get failed: %s", exc)
+    # In-process fallback
+    entry = _mem_context_cache.get(user_id)
+    if entry and time.monotonic() < entry[1]:
+        return entry[0]
+    return None
+
+
+def _cache_set(user_id: str, context: dict[str, Any]) -> None:
+    key = _CONTEXT_KEY_PREFIX + user_id
+    r = _get_redis()
+    if r is not None:
+        try:
+            r.setex(key, _CONTEXT_CACHE_TTL, json.dumps(context))
+            return
+        except Exception as exc:
+            logger.warning("context cache redis set failed: %s", exc)
+    # In-process fallback
+    _mem_context_cache[user_id] = (context, time.monotonic() + _CONTEXT_CACHE_TTL)
+
+
+async def fetch_user_context(user_id: str, api_base_url: str, service_api_key: str) -> dict[str, Any]:
+    """Fetch user vaults, balances, allocations, and recent APY snapshots.
+
+    Returns a dict with 'vaults', 'performance', and 'fetched_at'.
+    Raises on network or auth errors so the caller can fall back gracefully.
+    """
+    headers = {
+        "Authorization": f"Bearer {service_api_key}",
+        "Content-Type": "application/json",
+    }
+    base = api_base_url.rstrip("/")
+
+    async with aiohttp.ClientSession() as session:
+        # Fetch vaults scoped to this user
+        async with session.get(
+            f"{base}/api/v1/users/{user_id}/vaults",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as resp:
+            vaults_data = await resp.json() if resp.status == 200 else {}
+
+        # Fetch recent performance snapshots (best-effort)
+        async with session.get(
+            f"{base}/api/v1/performance/snapshots",
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as resp:
+            performance_data = await resp.json() if resp.status == 200 else {}
+
+    return {
+        "vaults": vaults_data,
+        "performance": performance_data,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _get_cached_user_context(user_id: str) -> dict[str, Any] | None:
+    """Return cached user context, or fetch and cache it. Returns None on failure."""
+    cached = _cache_get(user_id)
+    if cached is not None:
+        return cached
+    try:
+        ctx = await fetch_user_context(
+            user_id,
+            settings.nester_api_base_url,
+            settings.nester_service_api_key,
+        )
+        _cache_set(user_id, ctx)
+        return ctx
+    except Exception as exc:
+        logger.warning("fetch_user_context failed for user %s: %s", user_id, exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +263,24 @@ Provide personalized, data-driven advice based on user positions
 and current market conditions. Always cite specific numbers from their
 portfolio."""
 
-    messages = _to_anthropic_messages(history) + [
+    # Fetch live portfolio context (60s Redis-backed cache).
+    # Injected as a prepended user message so Claude can personalise responses
+    # without the instruction appearing in the visible conversation history.
+    # If the fetch fails, continue with static knowledge — no error surfaced.
+    user_context = await _get_cached_user_context(user_id)
+    context_injection: list[dict[str, str]] = []
+    if user_context:
+        context_injection = [
+            {
+                "role": "user",
+                "content": (
+                    "[PORTFOLIO CONTEXT — do not quote this back, use it to personalise your response]\n"
+                    + json.dumps(user_context, indent=2)
+                ),
+            }
+        ]
+
+    messages = context_injection + _to_anthropic_messages(history) + [
         {"role": "user", "content": message}
     ]
 
