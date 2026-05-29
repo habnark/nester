@@ -75,6 +75,37 @@ func (r *TransactionRepository) GetByHash(ctx context.Context, hash string) (tra
 	return model, nil
 }
 
+func (r *TransactionRepository) ListPendingOlderThan(ctx context.Context, cutoff time.Time) ([]transaction.Transaction, error) {
+	query := `
+		SELECT id, vault_id, type, amount, currency, tx_hash, status, error_reason, created_at, updated_at, confirmed_at
+		FROM transactions
+		WHERE status = $1
+		  AND tx_hash IS NOT NULL
+		  AND created_at <= $2
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, string(transaction.StatusPending), cutoff)
+	if err != nil {
+		return nil, mapTransactionError(err)
+	}
+	defer rows.Close()
+
+	var transactions []transaction.Transaction
+	for rows.Next() {
+		model, err := scanTransaction(rows)
+		if err != nil {
+			return nil, mapTransactionError(err)
+		}
+		transactions = append(transactions, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapTransactionError(err)
+	}
+
+	return transactions, nil
+}
+
 func (r *TransactionRepository) UpdateStatus(ctx context.Context, hash string, status transaction.TransactionStatus, confirmedAt *time.Time, errorReason string) (transaction.Transaction, error) {
 	result, err := r.db.ExecContext(
 		ctx,

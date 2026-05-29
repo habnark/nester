@@ -50,4 +50,9 @@ type Repository interface {
 	Upsert(ctx context.Context, model Transaction) (Transaction, error)
 	GetByHash(ctx context.Context, hash string) (Transaction, error)
 	UpdateStatus(ctx context.Context, hash string, status TransactionStatus, confirmedAt *time.Time, errorReason string) (Transaction, error)
+	// ListPendingOlderThan returns every transaction still in StatusPending
+	// whose created_at is at or before cutoff. The background poller uses it
+	// to find transactions that have had time to settle on-chain but were
+	// never reconciled (e.g. the client never polled GET /transactions/{hash}).
+	ListPendingOlderThan(ctx context.Context, cutoff time.Time) ([]Transaction, error)
 }

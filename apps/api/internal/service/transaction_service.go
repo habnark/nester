@@ -73,28 +73,51 @@ func (s *TransactionService) GetTransaction(ctx context.Context, hash string) (t
 		return transaction.Transaction{}, err
 	}
 
+	updated, _, err := s.ReconcileTransaction(ctx, model)
+	if err != nil {
+		return transaction.Transaction{}, err
+	}
+	return updated, nil
+}
+
+// ListPendingOlderThan returns transactions still pending whose age exceeds
+// minAge. The background poller calls this each tick; minAge keeps freshly
+// submitted transactions (which Horizon hasn't ingested yet) out of the batch.
+func (s *TransactionService) ListPendingOlderThan(ctx context.Context, minAge time.Duration) ([]transaction.Transaction, error) {
+	cutoff := time.Now().UTC().Add(-minAge)
+	return s.repository.ListPendingOlderThan(ctx, cutoff)
+}
+
+// ReconcileTransaction checks the on-chain status of a single transaction
+// against Horizon and persists a terminal status (completed/failed) if one has
+// been reached. It returns the latest transaction view and whether the status
+// actually changed. Transactions already in a terminal state, and those still
+// pending on-chain, are returned unchanged with changed=false. This is the
+// single source of truth for status reconciliation, shared by GetTransaction
+// (on-demand) and the background poller.
+func (s *TransactionService) ReconcileTransaction(ctx context.Context, model transaction.Transaction) (transaction.Transaction, bool, error) {
 	switch model.Status {
 	case transaction.StatusCompleted, transaction.StatusFailed:
-		return model, nil
+		return model, false, nil
 	}
 
-	horizonStatus, confirmedAt, errorReason, err := s.lookupHorizonTransaction(ctx, hash)
+	horizonStatus, confirmedAt, errorReason, err := s.lookupHorizonTransaction(ctx, model.TxHash)
 	if err != nil {
 		if errors.Is(err, errTransactionPending) {
-			return model, nil
+			return model, false, nil
 		}
-		return transaction.Transaction{}, err
+		return model, false, err
 	}
 
 	switch horizonStatus {
 	case transaction.StatusCompleted, transaction.StatusFailed:
-		updated, updateErr := s.repository.UpdateStatus(ctx, hash, horizonStatus, confirmedAt, errorReason)
+		updated, updateErr := s.repository.UpdateStatus(ctx, model.TxHash, horizonStatus, confirmedAt, errorReason)
 		if updateErr != nil {
-			return transaction.Transaction{}, updateErr
+			return model, false, updateErr
 		}
-		return updated, nil
+		return updated, true, nil
 	default:
-		return model, nil
+		return model, false, nil
 	}
 }
 
