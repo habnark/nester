@@ -379,6 +379,8 @@ fn expired_allowance_returns_zero() {
 // SEP-41: burn / burn_from
 // ---------------------------------------------------------------------------
 
+// burn() now requires vault auth (security fix for issue #500).
+// With mock_all_auths the vault auth is satisfied, so the happy path still works.
 #[test]
 fn burn_reduces_supply() {
     let env = Env::default();
@@ -392,6 +394,52 @@ fn burn_reduces_supply() {
     assert_eq!(client.balance(&user), 3_000);
     assert_eq!(client.total_supply(), 3_000);
     assert_eq!(client.total_assets(), 3_000);
+}
+
+/// A user calling burn() directly (without the vault authorising the call)
+/// must be rejected. This prevents bypassing vault fee accounting.
+#[test]
+#[should_panic]
+fn non_vault_cannot_burn_directly() {
+    let env = Env::default();
+    let vault = Address::generate(&env);
+    let token_id = env.register_contract(None, VaultTokenContract);
+    let client = VaultTokenContractClient::new(&env, &token_id);
+
+    env.mock_all_auths();
+    client.initialize(
+        &vault,
+        &String::from_str(&env, "T"),
+        &String::from_str(&env, "T"),
+        &7u32,
+    );
+    let user = Address::generate(&env);
+    client.mint_for_deposit(&user, &5_000_i128);
+
+    // Strip all mocked auths — the vault's require_auth() will now fire and panic.
+    env.set_auths(&[]);
+    client.burn(&user, &1_000_i128);
+}
+
+/// Vault-authorised burn updates both share balance and total_assets correctly.
+#[test]
+fn vault_authorised_burn_updates_accounting() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = setup(&env);
+
+    let user = Address::generate(&env);
+    // Deposit 10_000; simulate 10% yield → total_assets = 11_000
+    client.mint_for_deposit(&user, &10_000_i128);
+    client.set_total_assets(&11_000_i128);
+
+    // Vault burns 5_000 shares on behalf of a withdrawal.
+    // assets_to_reduce = 5_000 * 11_000 / 10_000 = 5_500
+    client.burn(&user, &5_000_i128);
+
+    assert_eq!(client.balance(&user), 5_000);
+    assert_eq!(client.total_supply(), 5_000);
+    assert_eq!(client.total_assets(), 5_500);
 }
 
 #[test]

@@ -144,9 +144,15 @@ impl VaultTokenContract {
         get_allowance(&env, &from, &spender)
     }
 
-    /// Burn `amount` of `from`'s own shares (SEP-41 user-initiated burn).
+    /// Burn `amount` of `from`'s shares.
+    ///
+    /// Restricted to the vault contract only. Direct calls by token holders are
+    /// rejected to prevent bypassing vault fee accounting (management fee,
+    /// early-withdrawal fee, performance fee). The vault's `withdraw()` path
+    /// must be used instead, which calls `burn_for_withdrawal` after applying
+    /// all fees and updating `total_shares`.
     pub fn burn(env: Env, from: Address, amount: i128) {
-        from.require_auth();
+        require_vault(&env);
         let total_supply = get_total_supply(&env);
         let total_assets = get_total_assets(&env);
         let assets_to_reduce = if total_supply > 0 && total_assets > 0 {
