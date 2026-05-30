@@ -1017,3 +1017,39 @@ fn process_emergency_queue_decrements_liquid_reserved() {
         "collect_fees should transfer fees once LiquidReserved is decremented after queue processing"
     );
 }
+
+/// Regression test for the zero-performance-fee-on-impairment invariant (#451).
+///
+/// When a vault is impaired (`yield_part < 0`), `withdraw` must NOT charge a
+/// performance fee. The fee guard is `if yield_part > 0` in `lib.rs`; a future
+/// refactor could silently drop it and start charging fees on losses. This test
+/// locks the behaviour in: with the early-withdrawal fee disabled, an impaired
+/// withdrawal returns the full impaired value with no fee skimmed off.
+#[test]
+fn withdrawal_charges_no_perf_fee_on_impairment() {
+    let (env, admin, token, vault, _treasury) = setup();
+    let user = Address::generate(&env);
+    let deposit = 1_000 * XLM;
+    mint(&token, &user, deposit);
+
+    // Isolate performance-fee behaviour by disabling the early-withdrawal fee.
+    let mut fee_config: FeeConfig = vault.get_fee_config();
+    fee_config.early_withdrawal_fee_bps = 0;
+    vault.set_fee_config(&admin, &fee_config);
+
+    vault.grant_role(&admin, &admin, &Role::Manager);
+    vault.deposit(&user, &deposit, &0);
+
+    // Simulate a 20% impairment: total assets drop from 1000 to 800.
+    vault.report_yield(&admin, &(-(200 * XLM)));
+
+    let shares = vault.get_shares(&user);
+    vault.withdraw(&user, &shares, &0);
+
+    // yield_part = 800 - 1000 = -200 (< 0) => no performance fee. The user
+    // recovers the full impaired 800 XLM, not 780 after a wrongful 10% fee.
+    // Soroban arithmetic is deterministic integer math (no FP rounding), so
+    // an exact equality is the right contract — per-review feedback.
+    let balance = token::Client::new(&env, &token.address).balance(&user);
+    assert_eq!(balance, 800 * XLM, "impairment must not charge a performance fee");
+}
